@@ -71,14 +71,14 @@ module UDP_NONBLOCKING(
 //---------------------------------------------------------------------------------------------------------------------
     
     typedef enum logic { 
-        S0,      // RX 
-        S1       // PROCESS
-    } state_t;
+        S0,      // First beat indication and skipping (RX)
+        S1       // Feeding the calc engins and processing the data beat by beat starting from 2nd beat
+    } RX;
 
 
     typedef enum logic { 
-        A,      // TRANSITION 
-        B       // TX
+        A,      // Setting the Output ready 
+        B       // Jumpnig back to A if Out_ready received else stay valid till Out_ready(TX)
      } TX;
     
 //---------------------------------------------------------------------------------------------------------------------
@@ -98,8 +98,8 @@ module UDP_NONBLOCKING(
     // Internal signals
     //---------------------------------------------------------------------------------------------------------------------
     
-    state_t state       = S0 ;
-    TX      state_tx    = A ;
+    RX state_rx = S0;
+    TX state_tx = A;
 
     logic [255:0] input_buf;
     logic [255:0] input_reg1;
@@ -117,6 +117,7 @@ module UDP_NONBLOCKING(
     logic         sum_CE;
     logic         clear_mem;
     logic         out_bit;
+    logic         out_bit_latch;
     logic         out_available;
         
     // logic [ 15:0] test;
@@ -165,9 +166,9 @@ module UDP_NONBLOCKING(
         endcase
     end
 
-    always_ff @( posedge clk ) begin : UDP_FSM
+    always_ff @( posedge clk ) begin : udp_data_loading_fsm
         if (!reset ) begin
-            state           <= S0;
+            state_rx           <= S0;
             state_tx        <= A ; //move to the reset of other FSM
             In_ready        <= 1'd1;
             out_available   <= 1'd1;
@@ -181,57 +182,60 @@ module UDP_NONBLOCKING(
             // op_code2        <= 16'd0;
             clear_mem       <= 1'd0;
         end else begin
-            unique case ( state )
+            unique case ( state_rx )
                 S0  :   begin
-                            if ( In_valid && In_ready ) begin
-                                count_beat <= count_beat + 7'd1;
-                                state      <= S1;
-                            end
-                        end
+
+                    if ( In_valid && In_ready ) begin
+                        count_beat <= count_beat + 7'd1;
+                        state_rx      <= S1;
+                    end
+                end
                 S1  :   begin
-                            if ( In_valid && In_ready ) begin
-                                unique case (count_beat)
-                                    7'd1: begin
-                                        count_beat                  <= count_beat + 7'd1;
-                                        if(out_bit) begin
-                                            op_code2    [ 15:  0]   <= In_data [176:160];
-                                        end
-                                        else begin
-                                            op_code     [ 15:  0]   <= In_data [176:160];
-                                        end
-                                        input_reg1 [159:  0]        <= In_data [159:  0];
-                                        input_reg1 [255:160]        <= 96'd0;
-                                    end
-                                    7'd62: begin
-                                        if (out_available) begin
-                                            count_beat              <= count_beat + 7'd1;
-                                            input_reg1 [127:  0]    <= 128'd0;
-                                            input_reg1 [255:128]    <= In_data [255:128];
-                                            state                   <= S0;
-                                            out_bit                 <= 1'd1;
-                                            count_beat              <= 7'd0;
-                                            In_ready                <= 1'd1;
-                                        end else begin
-                                            In_ready                <=  1'd0;
-                                        end
-                                    end
-                                    default: begin
-                                        count_beat                  <= count_beat + 7'd1;
-                                        input_reg1                  <= In_data;
-                                    end
-                                endcase
+                    if ( In_valid && In_ready ) begin
+                        unique case (count_beat)
+                            7'd1: begin
+                                count_beat                  <= count_beat + 7'd1;
+                                if(out_bit) begin
+                                    op_code2    [ 15:  0]   <= In_data [176:160];
+                                end
+                                else begin
+                                    op_code     [ 15:  0]   <= In_data [176:160];
+                                end
+                                input_reg1 [159:  0]        <= In_data [159:  0];
+                                input_reg1 [255:160]        <= 96'd0;
                             end
-                        end
+                            7'd62: begin
+                                if (out_available) begin
+                                    count_beat              <= count_beat + 7'd1;
+                                    input_reg1 [127:  0]    <= 128'd0;
+                                    input_reg1 [255:128]    <= In_data [255:128];
+                                    state_rx                   <= S0;
+                                    out_bit                 <= 1'd1;
+                                    count_beat              <= 7'd0;
+                                    In_ready                <= 1'd1;
+                                end else begin
+                                    In_ready                <= 1'd0;
+                                end
+                            end
+                            default: begin
+                                count_beat                  <= count_beat + 7'd1;
+                                input_reg1                  <= In_data;
+                            end
+                        endcase
+                    end
+                end
             endcase 
         end
     end
 
-    always_ff @( posedge clk ) begin : OUTPUT_SELECT
-    if (!reset ) begin
-        op_code2        <= 16'd0;
-    end
-    else begin
-            if (out_bit) begin
+    always_ff @( posedge clk ) begin : udp_data_output_handling_fsm //(Out_data/count_pd/out_bit_latch)
+        if (!reset ) begin
+            op_code2        <= 16'd0;
+            out_bit_latch   <= 1'b0;
+        end
+        else begin
+            if ( out_bit || out_bit_latch ) begin
+                out_bit_latch   <= 1'b0;
                 unique case (state_tx)
                     A: begin
                         unique case (count_pd)
@@ -251,16 +255,22 @@ module UDP_NONBLOCKING(
                             default: begin
                                 count_pd    <= count_pd + 7'd1;
                             end
-                        endcase 
+                        endcase
                     end
                     B: begin
                         if(Out_ready) begin
-                            Out_valid       <= 1'd1;
+                            Out_valid       <= 1'd0; //set Out_valid to 1 when juping to this stage
                             count_pd        <= 7'd0;
-                            out_bit         <= 1'b0;
-                            In_ready        <= 1'd1;
+                            out_bit_latch   <= 1'b0;
+                            In_ready        <= 1'd1; //set
                             out_available   <= 1'd1;
                             state_tx        <= A;
+                        end
+                        else begin
+                            Out_valid       <= 1'd1; //just to remember
+                            count_pd        <= 7'd0;
+                            In_ready        <= 1'd0;
+                            out_available   <= 1'd0;
                         end
                     end
                 endcase
