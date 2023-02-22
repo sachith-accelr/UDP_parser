@@ -206,7 +206,7 @@ module UDP_NONBLOCKING(
                             7'd4: begin
                                 count_beat <= count_beat + 7'd1;
                                 input_reg1 <= In_data;
-                                if(out_available || out_bit_latch) begin
+                                if(out_available && out_bit_latch) begin
                                     op_code             <= op_code2;
                                     op_code2            <= 16'd0;
                                 end
