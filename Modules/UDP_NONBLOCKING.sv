@@ -187,7 +187,8 @@ module UDP_NONBLOCKING(
 
                     if ( In_valid && In_ready ) begin
                         count_beat <= count_beat + 7'd1;
-                        state_rx      <= S1;
+                        input_reg1 <= 256'd0;
+                        state_rx   <= S1;
                     end
                 end
                 S1  :   begin
