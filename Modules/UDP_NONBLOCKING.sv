@@ -141,7 +141,7 @@ module UDP_NONBLOCKING(
     );
 
     always_comb begin : SELECTOR
-        if (!out_available) begin
+        if (!In_ready) begin
             sum_CE = 1'b0;
             max_CE = 1'b0;
         end
@@ -215,7 +215,6 @@ module UDP_NONBLOCKING(
                                 
                                 
                                 if (out_available) begin
-                                    // count_beat              <= count_beat + 7'd1;
                                     input_reg1 [127:  0]    <= 128'd0;
                                     input_reg1 [255:128]    <= In_data [255:128];
                                     state_rx                <= S0;
@@ -259,12 +258,10 @@ module UDP_NONBLOCKING(
                                 count_pd    <= count_pd + 7'd1;
                             end
                             7'd4: begin
-                                if(out_available) begin
-                                    Out_data [ 31: 0]   <= calc_out [31:0];
+                                Out_data [ 31: 0]   <= calc_out [31:0];
                                     Out_valid           <= 1'd1;
                                     state_tx            <= B;
                                 end
-                            end
                             default: begin
                                 count_pd    <= count_pd + 7'd1;
                             end
@@ -275,13 +272,11 @@ module UDP_NONBLOCKING(
                             Out_valid       <= 1'd0; //set Out_valid to 1 when juping to this stage
                             count_pd        <= 7'd0;
                             out_bit_latch   <= 1'b0;
-                            // In_ready        <= 1'd1; //set
                             out_available   <= 1'd1;
                             state_tx        <= A;
                         end
                         else begin
                             count_pd        <= 7'd0;
-                            // In_ready        <= 1'd0;
                             out_available   <= 1'd0;
                         end
                     end
